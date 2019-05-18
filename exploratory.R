@@ -53,8 +53,6 @@ s <- season2 %>%
   #                         judgesperpanel == 1 ~ "prelim",
   #                         TRUE ~ "error"))
 
-s
-
 ## number of rounds and win percent
 s %>% 
   filter(side %>% is.na == F) %>% 
