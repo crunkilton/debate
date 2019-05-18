@@ -1,8 +1,12 @@
 source("C:/Users/Cody/Dropbox/functions.R")
+setwd("C:/Users/Cody/Dropbox/debate_r")
+
+library(ggraph)
+
 # looking at stuff --------------------------------------------------------
 
-season <- read_csv("season_v2.csv")
-
+season <- read_csv("season_2019.csv") %>% rename(judge_id = judge)
+season
 # formatting df -----------------------------------------------------------
 
 ## making team identifiers
@@ -21,36 +25,45 @@ season %>%
 team_ids <- season %>% 
   select(school, schoolname, fullname) %>% unique %>% 
   mutate(team = paste0(schoolname, " ") %>% 
-           paste0(fullname %>% substr(1,1), fullname %>% str_remove(".* & ") %>% substr(1,1)), 
-         team_id = seq(1, nrow(.), 1))
+           paste0(fullname %>% substr(1,2), fullname %>% str_remove(".* & ") %>% substr(1,2)), 
+         team_id = seq(1, nrow(.), 1)) 
+
+
+## creating judge names
+
+judge_ids <- season %>% 
+  select(j_first, j_last, j_id) %>% unique %>% 
+  mutate(judge = paste(j_first, j_last))
 
 ## splitting down to only the team results, not individual ones, and merging correct team identifiers
-season %>% 
+season2 <- season %>% 
   select(-c(entry_student_id, first, last)) %>% 
-  unique %>% 
-  left_join(team_ids)
+  left_join(team_ids) %>% 
+  left_join(judge_ids)
 
-season
-season %>% View
-
+season2
 
 ## making dataframe more usable
-season
-newseason
 
-s <- season %>% 
-  select(code, judge, panel, side, win, tournname, eventname, timeslotname, rd_name, judgesperpanel, schoolname, entry_id, fullname) %>% 
-  rename(team = code, tournament = tournname, division = eventname, round = timeslotname, round_number = rd_name) %>% 
-  mutate(elim = case_when(judgesperpanel > 1 ~ "elim",
-                          judgesperpanel == 1 ~ "prelim",
-                          TRUE ~ "error"))
+s <- season2 %>% 
+  select(tournname, eventname, school, team, team_id, judge, judge_id, panel, side, win, timeslotname, rd_name, judgesperpanel, schoolname, fullname) %>% 
+  rename(tournament = tournname, division = eventname, round = timeslotname, round_number = rd_name) %>% 
+  unique
+  # mutate(elim = case_when(judgesperpanel > 1 ~ "elim",
+  #                         judgesperpanel == 1 ~ "prelim",
+  #                         TRUE ~ "error"))
 
+s
+
+## number of rounds and win percent
 s %>% 
-  group_by(schoolname, fullname) %>% 
-  summarise(winpct = mean(win, na.rm = T)*100,
+  filter(side %>% is.na == F) %>% 
+  group_by(team) %>% 
+  summarise(winpct = mean(win, na.rm = T),
             rounds = n_distinct(panel)) %>% 
-  filter(rounds > 20) %>% 
-  arrange(winpct %>% desc) 
+  arrange(rounds %>% desc, winpct %>% desc)
+  
+  ## 16k rounds this year
 
 ## win percent: about 50-50, out of 7500 rounds
 
@@ -60,11 +73,91 @@ s %>%
   filter(side %>% is.na == F) %>% 
   group_by(side) %>% 
   summarise(win = mean(win, na.rm = T),
-            rounds = n())
+            rounds = n_distinct(panel))
 
 
 ## looking at a person
 season %>% 
   filter(fullname %>% str_detect("Kostelny") == T) %>% 
-  select(judge, round, win, tournname) %>% 
+  select(j_first, j_last, round, win, tournname) %>% 
   print(n = Inf)
+
+
+
+# Networks ----------------------------------------------------------------
+
+library(tidygraph)
+library(igraph)
+
+
+d <- s %>% 
+  filter(team %>% str_detect("BYE") == F &
+           judge %>% str_detect("NA NA") == F)
+
+## number of judges and teams
+d %>% 
+  summarise(
+    n_judges = n_distinct(judge),
+    n_teams = n_distinct(team)
+  )
+
+
+
+## Who has been judged by whom?
+edgelist <- d %>% 
+ # filter(judge %>% str_detect("Crunkilton") == T) %>% 
+ # filter(judge != -1) %>% 
+  group_by(team, judge) %>% 
+  summarise(weight = n()) %>% 
+  arrange(weight %>% desc)
+
+
+## making the graph
+# type 0 = debaters, 1 = judges
+g <- graph_from_data_frame(edgelist, directed = F)
+V(g)$type <- ifelse(V(g)$name %in% edgelist$judge == T, 1, 0)
+
+V(g)$type <- V(g)$name %in% edgelist$judge
+
+plot(g, vertex.label.cex = 1, vertex.color = V(g)$type %>% as.factor, layout = layout.bipartite) # not pretty
+
+walktrap = cluster_walktrap(g)
+louvain = cluster_louvain(g)
+infomap = cluster_infomap(g)
+fast_greedy = cluster_fast_greedy(g)
+
+V(g)$walktrap = walktrap$membership
+V(g)$louvain = louvain$membership
+V(g)$infomap = infomap$membership
+V(g)$fast_greedy = fast_greedy$membership
+
+## Tidygraph
+
+t <- g %>% as_tbl_graph()
+
+## tidy node df
+
+cluster_nodes <- t %>% 
+  activate(nodes) %>% 
+  as_tibble() %>%
+  gather("cluster_algorithm", "community", -c(name, type))
+
+cluster_nodes %>% 
+  group_by(cluster_algorithm, community) %>% 
+  summarise(count = n())
+
+cluster_nodes %>% 
+  group_by(cluster_algorithm) %>% 
+  summarise(count = n_distinct(community))
+
+
+
+## not pretty graph that is too big
+
+ggraph(t) +
+  geom_node_point(size = .01) +
+  geom_edge_link(width = .0001) +
+  g #+
+#  geom_node_text(aes(label = name), size = .001)
+
+
