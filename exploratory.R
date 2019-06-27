@@ -195,12 +195,19 @@ e <- graph_from_data_frame(el, directed = FALSE)
 
 V(e)$type <- V(e)$name %in% edgelist$judge
 
-ggraph(e, layout = 'bipartite') + 
-  geom_node_point(aes(color = type), size = .1) +
+
+pic <- ggraph(e, layout = 'bipartite') + 
+  geom_node_point(aes(color = type), size = .5) +
   geom_edge_link(aes(width = weight)) +
   scale_edge_width(range = c(.1, 1))+ # control size
-  geom_node_text(aes(label = name), size = 2) +
+  geom_node_text(aes(label = name), size = 1) +
   theme_graph() 
+
+png('/Users/codycrunkilton/Desktop/g1.png', width = 100000, height = 100000)
+
+pic
+
+dev.off()
 
 ## cluster try2
 
